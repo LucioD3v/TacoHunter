@@ -1,0 +1,65 @@
+name: CI
+
+# Run on every PR and on pushes to the long-lived branches.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "test/**"
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python / Lambda)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip boto3
+
+      - name: Byte-compile Lambda
+        run: python -m py_compile lambda_function.py
+
+      - name: Run unit tests
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  app:
+    name: App (Flutter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.5"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
