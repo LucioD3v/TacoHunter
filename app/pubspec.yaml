@@ -1,0 +1,29 @@
+name: taco_hunter
+description: TacoHunter - AI-powered, context-aware taquería discovery on an interactive map.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Interactive map
+  google_maps_flutter: ^2.6.1
+
+  # Device location
+  geolocator: ^12.0.0
+
+  # HTTP client to consume the Lambda / API Gateway endpoint
+  http: ^1.2.1
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

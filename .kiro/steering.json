@@ -1,0 +1,12 @@
+{
+  "project_name": "TacoHunter",
+  "version": "1.0.0",
+  "architecture": "Serverless AWS (Lambda + Bedrock + DynamoDB) + Flutter Web Frontend",
+  "primary_language": "Python 3.12 (Backend), Dart (Frontend)",
+  "guidelines": [
+    "Keep AWS Lambda stateless and lightweight.",
+    "Use Amazon Nova / Bedrock for intent parsing and context matching.",
+    "Return geojson-friendly responses for easy map rendering in Flutter.",
+    "Follow Spec-Driven Development standards."
+  ]
+}
