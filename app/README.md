@@ -1,17 +1,18 @@
 # TacoHunter · Flutter app
 
-Cliente móvil de TacoHunter: muestra un mapa interactivo, obtiene la ubicación
-del usuario y consume la Lambda de backend para traducir un antojo en lenguaje
-natural a taquerías cercanas.
+Cliente móvil de TacoHunter: muestra un mapa interactivo de **Amazon Location
+Service** (renderizado con MapLibre), obtiene la ubicación del usuario y consume
+la Lambda de backend para traducir un antojo en lenguaje natural a taquerías
+cercanas.
 
 ## Estructura
 
 ```
 app/
-├── pubspec.yaml                  # Dependencias (google_maps_flutter, geolocator, http)
+├── pubspec.yaml                  # Dependencias (maplibre_gl, geolocator, http)
 ├── lib/
 │   ├── main.dart                 # Entry point + tema
-│   ├── config.dart               # URL del endpoint + defaults del mapa
+│   ├── config.dart               # Endpoint de la Lambda + config de Amazon Location Service
 │   ├── models/
 │   │   ├── taqueria.dart         # Modelo de taquería (store_id, name, lat, lng, ...)
 │   │   └── search_result.dart    # Respuesta de la Lambda (intent + taquerias)
@@ -19,12 +20,25 @@ app/
 │   │   ├── location_service.dart # Permisos + posición actual (geolocator)
 │   │   └── taco_api.dart         # Cliente HTTP de la Lambda
 │   └── screens/
-│       └── map_screen.dart       # Mapa + barra de búsqueda + marcadores
-├── android/app/src/main/AndroidManifest.xml  # Permisos + API key Android
+│       └── map_screen.dart       # Mapa ALS/MapLibre + búsqueda + símbolos
+├── android/app/src/main/AndroidManifest.xml  # Permisos (internet + ubicación)
 └── ios/Runner/
     ├── Info.plist                # Permisos de ubicación
-    └── AppDelegate.swift         # API key de Google Maps iOS
+    └── AppDelegate.swift         # Sin SDK de mapas (MapLibre + ALS por URL)
 ```
+
+## El mapa: Amazon Location Service
+
+El mapa base se sirve desde un recurso **Map** de Amazon Location Service como
+estilo compatible con MapLibre. La app apunta `maplibre_gl` a la URL del estilo:
+
+```
+https://maps.geo.<region>.amazonaws.com/maps/v0/maps/<MapName>/style-descriptor?key=<ApiKey>
+```
+
+No se embebe ninguna clave de proveedor de mapas en el código nativo: la API key
+de Amazon Location Service se pasa en tiempo de ejecución dentro de esa URL
+(ver `lib/config.dart`).
 
 ## Contrato con la Lambda
 
@@ -67,10 +81,11 @@ Respuesta esperada (status 200, CORS habilitado):
    flutter pub get
    ```
 
-3. Configura las claves y el endpoint:
-   - `lib/config.dart` → `apiBaseUrl` con la URL de tu API Gateway.
-   - `android/app/src/main/AndroidManifest.xml` → `YOUR_ANDROID_MAPS_API_KEY`.
-   - `ios/Runner/AppDelegate.swift` → `YOUR_IOS_MAPS_API_KEY`.
+3. Configura el endpoint y Amazon Location Service en `lib/config.dart`:
+   - `apiBaseUrl` → la URL de tu API Gateway.
+   - `alsRegion` → región de tus recursos de Amazon Location (p. ej. `us-east-1`).
+   - `alsMapName` → nombre del recurso Map (p. ej. `TacoRadar-Map`).
+   - `alsApiKey` → API key de Amazon Location Service con alcance al Map.
 
 4. Ejecuta:
 
@@ -80,7 +95,7 @@ Respuesta esperada (status 200, CORS habilitado):
 
 ## Notas
 
-- Android requiere `minSdkVersion >= 21` para `google_maps_flutter`.
+- El mapa se renderiza con `maplibre_gl`; Android requiere `minSdkVersion >= 21`.
 - iOS requiere plataforma mínima 14.0 (ajústalo en `ios/Podfile`).
-- Las claves de Google Maps de Android e iOS son distintas y deben tener
-  habilitadas las APIs "Maps SDK for Android" / "Maps SDK for iOS".
+- La API key de Amazon Location Service debe estar restringida al recurso Map
+  (y opcionalmente a Places/Routes si los agregas).

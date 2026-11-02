@@ -11,8 +11,9 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
 
-  # Interactive map
-  google_maps_flutter: ^2.6.1
+  # Interactive map rendered from Amazon Location Service map styles
+  # (vector tiles via the MapLibre GL renderer).
+  maplibre_gl: ^0.20.0
 
   # Device location
   geolocator: ^12.0.0

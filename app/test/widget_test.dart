@@ -1,8 +1,8 @@
 // Basic smoke test for the TacoHunter app.
 //
-// Note: the map screen requires platform channels (Google Maps, geolocator),
-// so this test only verifies that the root widget builds and renders the
-// search bar without throwing.
+// Note: the map screen requires platform channels (Amazon Location Service
+// map via MapLibre, geolocator), so this test only verifies that the root
+// widget builds and renders the search bar without throwing.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
