@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../config.dart';
 import '../models/search_result.dart';
@@ -10,8 +10,9 @@ import '../models/taqueria.dart';
 import '../services/location_service.dart';
 import '../services/taco_api.dart';
 
-/// Main screen: an interactive Google Map plus a craving search bar that
-/// consumes the TacoHunter Lambda and drops a marker per matching taquería.
+/// Main screen: an interactive Amazon Location Service map (rendered with the
+/// MapLibre GL renderer) plus a craving search bar that consumes the
+/// TacoHunter Lambda and drops a symbol per matching taquería.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -20,7 +21,7 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  final Completer<GoogleMapController> _mapController = Completer();
+  MapLibreMapController? _mapController;
   final TextEditingController _promptController = TextEditingController();
   final LocationService _locationService = LocationService();
   final TacoApi _api = TacoApi();
@@ -32,19 +33,17 @@ class _MapScreenState extends State<MapScreen> {
 
   LatLng _userLocation =
       const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
-  Set<Marker> _markers = {};
   bool _loading = false;
+  bool _styleLoaded = false;
   SearchIntent? _lastIntent;
+
+  /// Symbols currently on the map, kept parallel to [_results] by index so a
+  /// list tap can map back to its symbol.
+  final List<Symbol> _symbols = [];
 
   /// Latest results, sorted nearest-first, kept so the "fit results" action
   /// can recompute the camera bounds.
   List<Taqueria> _results = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _initLocation();
-  }
 
   @override
   void dispose() {
@@ -52,6 +51,19 @@ class _MapScreenState extends State<MapScreen> {
     _sheetController.dispose();
     _api.dispose();
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Map lifecycle
+  // ---------------------------------------------------------------------------
+  void _onMapCreated(MapLibreMapController controller) {
+    _mapController = controller;
+    controller.onSymbolTapped.add(_onSymbolTapped);
+  }
+
+  Future<void> _onStyleLoaded() async {
+    _styleLoaded = true;
+    await _initLocation();
   }
 
   Future<void> _initLocation() async {
@@ -67,12 +79,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _animateTo(LatLng target, double zoom) async {
-    final controller = await _mapController.future;
-    await controller.animateCamera(
+    await _mapController?.animateCamera(
       CameraUpdate.newLatLngZoom(target, zoom),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Search
+  // ---------------------------------------------------------------------------
   Future<void> _search() async {
     final prompt = _promptController.text.trim();
     if (prompt.isEmpty) {
@@ -96,8 +110,9 @@ class _MapScreenState extends State<MapScreen> {
         _lastIntent = result.intent;
         _results = sorted;
         _selectedIndex = null;
-        _markers = _buildMarkers(sorted);
       });
+
+      await _renderSymbols(sorted);
 
       if (sorted.isEmpty) {
         _showSnack('No encontramos taquerías para ese antojo.');
@@ -106,7 +121,6 @@ class _MapScreenState extends State<MapScreen> {
           'Encontramos ${result.count} taquería(s) · '
           '${result.intent.specialty} / ${result.intent.vibe}',
         );
-        // Recenter the map over the results.
         await _fitToResults();
       }
     } catch (e) {
@@ -121,8 +135,10 @@ class _MapScreenState extends State<MapScreen> {
   List<Taqueria> _sortByDistance(List<Taqueria> taquerias) {
     final list = List<Taqueria>.from(taquerias);
     list.sort((a, b) {
-      final da = a.distanceKmFrom(_userLocation.latitude, _userLocation.longitude);
-      final db = b.distanceKmFrom(_userLocation.latitude, _userLocation.longitude);
+      final da =
+          a.distanceKmFrom(_userLocation.latitude, _userLocation.longitude);
+      final db =
+          b.distanceKmFrom(_userLocation.latitude, _userLocation.longitude);
       if (da == null && db == null) return 0;
       if (da == null) return 1;
       if (db == null) return -1;
@@ -137,38 +153,43 @@ class _MapScreenState extends State<MapScreen> {
     return '${km.toStringAsFixed(1)} km';
   }
 
-  /// Stable marker id tied to the result index, so the list and the map share
-  /// the same identity and we can open a specific InfoWindow on tap.
-  MarkerId _markerIdFor(int index) => MarkerId('taqueria_$index');
+  // ---------------------------------------------------------------------------
+  // Symbols (map markers)
+  // ---------------------------------------------------------------------------
+  Future<void> _renderSymbols(List<Taqueria> taquerias) async {
+    final controller = _mapController;
+    if (controller == null || !_styleLoaded) return;
 
-  Set<Marker> _buildMarkers(List<Taqueria> taquerias) {
-    final markers = <Marker>{};
+    await controller.clearSymbols();
+    _symbols.clear();
+
     for (var i = 0; i < taquerias.length; i++) {
       final t = taquerias[i];
       if (!t.hasLocation) continue;
-      final km =
-          t.distanceKmFrom(_userLocation.latitude, _userLocation.longitude);
-      markers.add(
-        Marker(
-          markerId: _markerIdFor(i),
-          position: LatLng(t.lat!, t.lng!),
-          infoWindow: InfoWindow(
-            title: t.name ?? 'Taquería',
-            snippet: [
-              if (t.specialty != null) t.specialty,
-              if (km != null) 'a ${_distanceLabel(km)}',
-              if (t.address != null) t.address,
-            ].whereType<String>().join(' · '),
-          ),
-          onTap: () => _selectTaqueria(i, moveSheet: true),
+      final symbol = await controller.addSymbol(
+        SymbolOptions(
+          geometry: LatLng(t.lat!, t.lng!),
+          iconImage: 'marker-15', // built-in MapLibre sprite
+          iconSize: 1.8,
+          textField: '${i + 1}',
+          textOffset: const Offset(0, 1.4),
+          textSize: 12,
         ),
+        {'index': i}, // data payload so taps resolve back to the result
       );
+      _symbols.add(symbol);
     }
-    return markers;
   }
 
-  /// Focus a taquería: center the camera on its marker, open its InfoWindow,
-  /// and highlight its card in the list.
+  void _onSymbolTapped(Symbol symbol) {
+    final data = symbol.data;
+    final index = (data is Map && data['index'] is int)
+        ? data['index'] as int
+        : _symbols.indexOf(symbol);
+    if (index >= 0) _selectTaqueria(index, moveSheet: true);
+  }
+
+  /// Focus a taquería: center the camera on its symbol and highlight its card.
   Future<void> _selectTaqueria(int index, {bool moveSheet = false}) async {
     if (index < 0 || index >= _results.length) return;
     final t = _results[index];
@@ -176,14 +197,10 @@ class _MapScreenState extends State<MapScreen> {
 
     setState(() => _selectedIndex = index);
 
-    final controller = await _mapController.future;
-    await controller.animateCamera(
+    await _mapController?.animateCamera(
       CameraUpdate.newLatLngZoom(LatLng(t.lat!, t.lng!), 16),
     );
-    // Give the camera a moment, then open the InfoWindow.
-    await controller.showMarkerInfoWindow(_markerIdFor(index));
 
-    // Collapse the sheet a bit so the marker stays visible.
     if (moveSheet && _sheetController.isAttached) {
       await _sheetController.animateTo(
         0.28,
@@ -193,7 +210,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  /// Fit the camera so every result marker (plus the user) is visible.
+  /// Fit the camera so every result symbol (plus the user) is visible.
   Future<void> _fitToResults() async {
     final points = <LatLng>[
       _userLocation,
@@ -202,15 +219,20 @@ class _MapScreenState extends State<MapScreen> {
     ];
 
     if (points.length < 2) {
-      // Nothing to frame beyond the user; just center on them.
       await _animateTo(_userLocation, AppConfig.defaultZoom);
       return;
     }
 
     final bounds = _boundsFromPoints(points);
-    final controller = await _mapController.future;
-    // 60px padding so markers aren't flush against the screen edges.
-    await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        bounds,
+        left: 50,
+        right: 50,
+        top: 120,
+        bottom: 220,
+      ),
+    );
   }
 
   LatLngBounds _boundsFromPoints(List<LatLng> points) {
@@ -246,7 +268,6 @@ class _MapScreenState extends State<MapScreen> {
       floatingActionButton: _results.isEmpty
           ? null
           : Padding(
-              // Lift the button above the collapsed bottom sheet.
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).size.height * 0.12,
               ),
@@ -258,19 +279,15 @@ class _MapScreenState extends State<MapScreen> {
             ),
       body: Stack(
         children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: _userLocation,
+          MapLibreMap(
+            styleString: AppConfig.alsStyleUrl,
+            initialCameraPosition: const CameraPosition(
+              target: LatLng(AppConfig.defaultLat, AppConfig.defaultLng),
               zoom: AppConfig.defaultZoom,
             ),
             myLocationEnabled: true,
-            myLocationButtonEnabled: true,
-            markers: _markers,
-            onMapCreated: (controller) {
-              if (!_mapController.isCompleted) {
-                _mapController.complete(controller);
-              }
-            },
+            onMapCreated: _onMapCreated,
+            onStyleLoadedCallback: _onStyleLoaded,
           ),
           SafeArea(
             child: Padding(
@@ -377,7 +394,7 @@ class _IntentChips extends StatelessWidget {
 }
 
 /// Draggable bottom sheet listing the results nearest-first. Tapping a card
-/// focuses its marker on the map.
+/// focuses its symbol on the map.
 class _ResultsSheet extends StatelessWidget {
   final DraggableScrollableController controller;
   final List<Taqueria> results;
@@ -430,7 +447,8 @@ class _ResultsSheet extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Row(
                   children: [
-                    Icon(Icons.restaurant, size: 18, color: theme.colorScheme.primary),
+                    Icon(Icons.restaurant,
+                        size: 18, color: theme.colorScheme.primary),
                     const SizedBox(width: 8),
                     Text(
                       '${results.length} taquería${results.length == 1 ? '' : 's'} cerca de ti',
@@ -445,7 +463,8 @@ class _ResultsSheet extends StatelessWidget {
                   controller: scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: results.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, indent: 72),
                   itemBuilder: (context, index) {
                     final t = results[index];
                     final km = t.distanceKmFrom(
